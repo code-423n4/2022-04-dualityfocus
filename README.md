@@ -45,11 +45,11 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 
 ## ⭐️ Sponsor: Contest prep
 - [ ] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
-- [ ] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
+- [X] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
 - [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 8 hours prior to contest start time.**
-- [ ] Ensure that you have access to the _findings_ repo where issues will be submitted.
-- [ ] Promote the contest on Twitter (optional: tag in relevant protocols, etc.)
-- [ ] Share it with your own communities (blog, Discord, Telegram, email newsletters, etc.)
+- [X] Ensure that you have access to the _findings_ repo where issues will be submitted.
+- [X] Promote the contest on Twitter (optional: tag in relevant protocols, etc.)
+- [X] Share it with your own communities (blog, Discord, Telegram, email newsletters, etc.)
 - [ ] Optional: pre-record a high-level overview of your protocol (not just specific smart contract functions). This saves wardens a lot of time wading through documentation.
 - [ ] Delete this checklist and all text above the line below when you're ready.
 
@@ -66,4 +66,51 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 
 This repo will be made public before the start of the contest. (C4 delete this line when made public)
 
-[ ⭐️ SPONSORS ADD INFO HERE ]
+# Contest Scope
+**TODO**:
+
+
+# Duality Focus Overview
+Duality Focus is a money market where both ERC-20 assets and Uniswap V3 liquidity positions are accepted as collateral. On Focus, users can engage in familiar DeFi operations like lending and borrowing ERC-20 assets. However, because we underwrite Uniswap V3 positions from selected pools, new usecases become possible. Users can supply their V3 ranges as additional collateral and get access to additional borrow power. Our flagship usecase is "focus": users can leverage ranges with supported ERC-20 assets, increasing fees earned. They can also move liquidity, move positions to different ticks, and compound fees, all with a single click.
+
+We plan to launch Focus on Polygon first, but eventually every chain that Uniswap V3 is deployed on. 
+
+## Contract Architecture
+Focus is a combination of modified Compound contracts, modified Rari Capital contracts, Uniswap V3 dependencies, and custom contracts.
+At a high level, our contracts consist of:
+- Forked Compound base contracts and forked Rari Capital contracts for the money market implementation
+  - The main modifications are to support valuing and liquidating Uniswap V3 collateral
+- LP Vault contract that holds all Uniswap V3 ranges. 
+  - Supports all new range operations we introduce: focusing ranges, repaying debt from ranges, compounding fees, and moving ranges. Also supports other Uniswap V3 NonfungiblePositionManager operations like adding and removing liquidity. 
+  - Supports partially seizing assets from a range in the case of a liquidation.
+- Oracle contract that supports Uniswap V3 ranges.
+
+The commit log reflects these changes and we recommend going through them individually. More information on contracts can be found here [**TODO: link to contracts readme**]. Please also refer to our Gitbook docs linked below.
+
+## Known Issues/Tradeoffs
+- **Uniswap V3 TWAP manipulation**
+
+  An attacker manipulating a Uniswap V3 pool tick could manipulate the value of a collateral V3 position. We are planning to have a strict criteria for supported assets and Uniswap V3 pools. At launch, we plan to only support blue-chip Polygon assets and high-TVL pools (see the full list [here](https://dualitylabs.gitbook.io/duality/duality-focus/supported-assets-pools)). This is an active area of research for us as we onboard new assets and pools. We are also considering using Chainlink oracles instead.
+
+- **Upgradeability**
+
+  We have removed Compound's CToken and Comptroller upgradeability. However, the admin can update the LP Vault contract address, and can also update the oracle used for a given asset.
+
+# Resources
+## Duality Links
+- [Blog](https://mirror.xyz/0x426D702b3ECc4a2f50E575413f20642bbDB8965e)
+- [Gitbook](https://dualitylabs.gitbook.io/duality/)
+- [Website](https://www.dualityfi.xyz/)
+- [Discord](discord.gg/nDRCdF6Bnc)
+- [Twitter](https://twitter.com/DualityFi)
+## Other Links
+- [Compound Docs](https://compound.finance/docs)
+- [Rari Capital Docs](https://docs.rari.capital/)
+- [Uniswap V3 Docs](https://docs.uniswap.org/protocol/reference/smart-contracts)
+## Contact Us
+- Drama
+  - Discord: DramaOne#4728
+  - [Twitter](https://twitter.com/0xdramaone)
+- Kismet 
+  - Discord: kismet108#7212
+  - [Twitter](https://twitter.com/kismet108)

@@ -72,7 +72,7 @@ This repo will be made public before the start of the contest. (C4 delete this l
 
 The following contracts are in scope (with their line counts):
 | File | statements | branches | functions | Lines (excluding global variable declarations, function signatures , run over lines and event definitions) |
-| -------------------- | ---------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------- | -------------------- | --------------------- |
+| -------------------- | ---------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------- |
 | CErc20.sol | 31 | 8	| 14 | 30 |
 | CErc20Immutable.sol | 3	| 0	| 1	| 3 |
 | CToken.sol | 437 | 232 | 53 | 437 |
@@ -83,19 +83,23 @@ The following contracts are in scope (with their line counts):
 | UniswapTwapOracle.sol	| 31 | 16 | 10	| 32 |
 | TOTAL | 1160 | 626 | 169 | 1172 |
 
-CErc20.sol
-* External Called Contracts: CToken.sol
-CToken.sol
-* External Called Contracts: Comptroller.sol
-Comptroller.sol
-* External Called Contracts: CErc20.sol, UniV3LpVault.sol, oracles
-UniV3LpVault.sol
-* External Called Contracts: Comptroller.sol, FlashLoan.sol, NonfungiblePositionManager.sol (v3-periphery), SwapRouter.sol (v3-periphery)
-* Libraries: TransferHelper.sol (v3-core), BytesLib.sol (v3-periphery), Uint256Casting.sol (opyn), LiquidityLibrary.sol (ours), SafeMath.sol (OpenZeppelin)
-FlashLoan.sol
-* External Called Contracts: UniV3LpVault.sol
-* Libraries: FlashLoan Receiver (aave)
-UniswapTwapOracle.sol
+<br>
+
+#### CErc20.sol
+- External Called Contracts: CToken.sol
+#### CToken.sol
+- External Called Contracts: Comptroller.sol
+#### Comptroller.sol
+- External Called Contracts: CErc20.sol, UniV3LpVault.sol, oracles
+#### UniV3LpVault.sol
+- External Called Contracts: Comptroller.sol, FlashLoan.sol, TickOracle.sol, NonfungiblePositionManager.sol (v3-periphery), SwapRouter.sol (v3-periphery)
+- Libraries: TransferHelper.sol (v3-core), BytesLib.sol (v3-periphery), Uint256Casting.sol (opyn), LiquidityLibrary.sol (ours), SafeMath.sol (OpenZeppelin)
+#### FlashLoan.sol
+- External Called Contracts: UniV3LpVault.sol
+- Libraries: FlashLoan Receiver (aave)
+#### UniswapTwapOracle.sol
+- External Called Contracts: UniswapV3Pool.sol (v3-core)
+- Libraries: UniswapTwapLibrary.sol (ours), LpBreakdownLibrary.sol (ours), SafeMath.sol (OpenZeppelin), UInt256Casting.sol (opyn)
 
 
 # Duality Focus Overview

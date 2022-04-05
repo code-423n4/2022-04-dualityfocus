@@ -67,7 +67,35 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 This repo will be made public before the start of the contest. (C4 delete this line when made public)
 
 # Contest Scope
-**TODO**:
+
+
+
+The following contracts are in scope (with their line counts):
+| File | statements | branches | functions | Lines (excluding global variable declarations, function signatures , run over lines and event definitions) |
+| -------------------- | ---------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------- | -------------------- | --------------------- |
+| CErc20.sol | 31 | 8	| 14 | 30 |
+| CErc20Immutable.sol | 3	| 0	| 1	| 3 |
+| CToken.sol | 437 | 232 | 53 | 437 |
+| Comptroller.sol	| 404	| 234	| 48 | 424 |
+| UniV3LpVault.sol | 215	| 114	| 35 | 209 |
+| FlashLoan.sol	| 15 | 4 | 2 | 15 |
+| MasterPriceOracle.sol | 24 | 18 | 6 | 22 |
+| UniswapTwapOracle.sol	| 31 | 16 | 10	| 32 |
+| TOTAL | 1160 | 626 | 169 | 1172 |
+
+CErc20.sol
+* External Called Contracts: CToken.sol
+CToken.sol
+* External Called Contracts: Comptroller.sol
+Comptroller.sol
+* External Called Contracts: CErc20.sol, UniV3LpVault.sol, oracles
+UniV3LpVault.sol
+* External Called Contracts: Comptroller.sol, FlashLoan.sol, NonfungiblePositionManager.sol (v3-periphery), SwapRouter.sol (v3-periphery)
+* Libraries: TransferHelper.sol (v3-core), BytesLib.sol (v3-periphery), Uint256Casting.sol (opyn), LiquidityLibrary.sol (ours), SafeMath.sol (OpenZeppelin)
+FlashLoan.sol
+* External Called Contracts: UniV3LpVault.sol
+* Libraries: FlashLoan Receiver (aave)
+UniswapTwapOracle.sol
 
 
 # Duality Focus Overview

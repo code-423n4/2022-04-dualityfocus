@@ -86,6 +86,8 @@ More information on contracts can be found in [the contracts README](https://git
   
 ## How to get started
 
+First make a `.env` file as in `.env.example`.
+
 To install necessary libraries and build our types:
 
 ```

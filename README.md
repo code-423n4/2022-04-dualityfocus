@@ -85,6 +85,8 @@ The following contracts are in scope (with their line counts):
 
 <br>
 
+all libraries used in the above contracts are also within scope, especially those written by Duality (contracts/libs). Below is an outline of contract external and library dependencies.
+
 #### CErc20.sol
 - External Called Contracts: CToken.sol
 #### CToken.sol
@@ -100,7 +102,6 @@ The following contracts are in scope (with their line counts):
 #### UniswapTwapOracle.sol
 - External Called Contracts: UniswapV3Pool.sol (v3-core)
 - Libraries: UniswapTwapLibrary.sol (ours), LpBreakdownLibrary.sol (ours), SafeMath.sol (OpenZeppelin), UInt256Casting.sol (opyn)
-
 
 # Duality Focus Overview
 Duality Focus is a money market where both ERC-20 assets and Uniswap V3 liquidity positions are accepted as collateral. On Focus, users can engage in familiar DeFi operations like lending and borrowing ERC-20 assets. However, because we underwrite Uniswap V3 positions from selected pools, new usecases become possible. Users can supply their V3 ranges as additional collateral and get access to additional borrow power. Our flagship usecase is "focus": users can leverage ranges with supported ERC-20 assets, increasing fees earned. They can also move liquidity, move positions to different ticks, and compound fees, all with a single click.

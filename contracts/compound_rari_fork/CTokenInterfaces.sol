@@ -1,33 +1,10 @@
 pragma solidity ^0.5.16;
 
-import "./IFuseFeeDistributor.sol";
-import "./ComptrollerStorage.sol";
 import "./ComptrollerInterface.sol";
 import "./InterestRateModel.sol";
+import "./EIP20NonStandardInterface.sol";
 
-contract CTokenAdminStorage {
-    /**
-     * @notice Administrator for Fuse
-     */
-    IFuseFeeDistributor internal constant fuseAdmin = IFuseFeeDistributor(0xa731585ab05fC9f83555cf9Bff8F58ee94e18F85);
-
-    /**
-     * @dev LEGACY USE ONLY: Administrator for this contract
-     */
-    address payable internal __admin;
-
-    /**
-     * @dev LEGACY USE ONLY: Whether or not the Fuse admin has admin rights
-     */
-    bool internal __fuseAdminHasRights;
-
-    /**
-     * @dev LEGACY USE ONLY: Whether or not the admin has admin rights
-     */
-    bool internal __adminHasRights;
-}
-
-contract CTokenStorage is CTokenAdminStorage {
+contract CTokenStorage {
     /**
      * @dev Guard variable for re-entrancy checks
      */
@@ -54,14 +31,18 @@ contract CTokenStorage is CTokenAdminStorage {
     uint256 internal constant borrowRateMaxMantissa = 0.0005e16;
 
     /**
-     * @notice Maximum fraction of interest that can be set aside for reserves + fees
+     * @notice Maximum fraction of interest that can be set aside for reserves
      */
-    uint256 internal constant reserveFactorPlusFeesMaxMantissa = 1e18;
+    uint256 internal constant reserveFactorMaxMantissa = 1e18;
+    /**
+     * @notice Administrator for this contract
+     */
+    address payable public admin;
 
     /**
-     * @notice LEGACY USE ONLY: Pending administrator for this contract
+     * @notice Pending administrator for this contract
      */
-    address payable private __pendingAdmin;
+    address payable public pendingAdmin;
 
     /**
      * @notice Contract which oversees inter-cToken operations
@@ -77,16 +58,6 @@ contract CTokenStorage is CTokenAdminStorage {
      * @notice Initial exchange rate used when minting the first CTokens (used when totalSupply = 0)
      */
     uint256 internal initialExchangeRateMantissa;
-
-    /**
-     * @notice Fraction of interest currently set aside for admin fees
-     */
-    uint256 public adminFeeMantissa;
-
-    /**
-     * @notice Fraction of interest currently set aside for Fuse fees
-     */
-    uint256 public fuseFeeMantissa;
 
     /**
      * @notice Fraction of interest currently set aside for reserves
@@ -112,16 +83,6 @@ contract CTokenStorage is CTokenAdminStorage {
      * @notice Total amount of reserves of the underlying held in this market
      */
     uint256 public totalReserves;
-
-    /**
-     * @notice Total amount of admin fees of the underlying held in this market
-     */
-    uint256 public totalAdminFees;
-
-    /**
-     * @notice Total amount of Fuse fees of the underlying held in this market
-     */
-    uint256 public totalFuseFees;
 
     /**
      * @notice Total number of tokens in circulation
@@ -217,6 +178,15 @@ contract CTokenInterface is CTokenStorage {
     /*** Admin Events ***/
 
     /**
+     * @notice Event emitted when pendingAdmin is changed
+     */
+    event NewPendingAdmin(address oldPendingAdmin, address newPendingAdmin);
+    /**
+     * @notice Event emitted when pendingAdmin is accepted, which means admin is updated
+     */
+    event NewAdmin(address oldAdmin, address newAdmin);
+
+    /**
      * @notice Event emitted when comptroller is changed
      */
     event NewComptroller(ComptrollerInterface oldComptroller, ComptrollerInterface newComptroller);
@@ -240,16 +210,6 @@ contract CTokenInterface is CTokenStorage {
      * @notice Event emitted when the reserves are reduced
      */
     event ReservesReduced(address admin, uint256 reduceAmount, uint256 newTotalReserves);
-
-    /**
-     * @notice Event emitted when the admin fee is changed
-     */
-    event NewAdminFee(uint256 oldAdminFeeMantissa, uint256 newAdminFeeMantissa);
-
-    /**
-     * @notice Event emitted when the Fuse fee is changed
-     */
-    event NewFuseFee(uint256 oldFuseFeeMantissa, uint256 newFuseFeeMantissa);
 
     /**
      * @notice EIP20 Transfer event
@@ -354,6 +314,11 @@ contract CErc20Interface is CErc20Storage {
         uint256 repayAmount,
         CTokenInterface cTokenCollateral
     ) external returns (uint256);
+
+    function sweepToken(EIP20NonStandardInterface token) external;
+
+    /*** Admin Functions ***/
+    function _addReserves(uint256 addAmount) external returns (uint256);
 }
 
 contract CEtherInterface is CErc20Storage {

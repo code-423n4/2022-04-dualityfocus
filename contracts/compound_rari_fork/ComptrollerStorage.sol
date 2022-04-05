@@ -1,15 +1,9 @@
 pragma solidity ^0.5.16;
 
-import "./IFuseFeeDistributor.sol";
 import "./CToken.sol";
 import "./PriceOracle.sol";
 
 contract UnitrollerAdminStorage {
-    /**
-     * @notice Administrator for Fuse
-     */
-    IFuseFeeDistributor internal constant fuseAdmin = IFuseFeeDistributor(0xa731585ab05fC9f83555cf9Bff8F58ee94e18F85);
-
     /**
      * @notice Administrator for this contract
      */
@@ -19,23 +13,6 @@ contract UnitrollerAdminStorage {
      * @notice Pending administrator for this contract
      */
     address public pendingAdmin;
-
-    /**
-     * @notice Whether or not the Fuse admin has admin rights
-     */
-    bool public fuseAdminHasRights = true;
-
-    /**
-     * @notice Whether or not the admin has admin rights
-     */
-    bool public adminHasRights = true;
-
-    /**
-     * @notice Returns a boolean indicating if the sender has admin rights
-     */
-    function hasAdminRights() internal view returns (bool) {
-        return (msg.sender == admin && adminHasRights) || (msg.sender == address(fuseAdmin) && fuseAdminHasRights);
-    }
 
     /**
      * @notice Active brains of Unitroller
@@ -53,6 +30,8 @@ contract ComptrollerV1Storage is UnitrollerAdminStorage {
      * @notice Oracle which gives the price of any given asset
      */
     PriceOracle public oracle;
+
+
 
     /**
      * @notice Multiplier used to calculate the maximum repayAmount when liquidating a borrow
@@ -121,18 +100,6 @@ contract ComptrollerV2Storage is ComptrollerV1Storage {
     /// @notice All cTokens addresses mapped by their underlying token addresses
     mapping(address => CToken) public cTokensByUnderlying;
 
-    /// @notice Whether or not the supplier whitelist is enforced
-    bool public enforceWhitelist;
-
-    /// @notice Maps addresses to booleans indicating if they are allowed to supply assets (i.e., mint cTokens)
-    mapping(address => bool) public whitelist;
-
-    /// @notice An array of all whitelisted accounts
-    address[] public whitelistArray;
-
-    /// @notice Indexes of account addresses in the `whitelistArray` array
-    mapping(address => uint256) internal whitelistIndexes;
-
     /**
      * @notice The Pause Guardian can pause certain actions as a safety mechanism.
      *  Actions which allow users to remove their own assets cannot be paused.
@@ -161,9 +128,6 @@ contract ComptrollerV3Storage is ComptrollerV2Storage {
 
     /// @notice Supply caps enforced by mintAllowed for each cToken address. Defaults to zero which corresponds to unlimited supplying.
     mapping(address => uint256) public supplyCaps;
-
-    /// @notice RewardsDistributor contracts to notify of flywheel changes.
-    address[] public rewardsDistributors;
 
     /// @dev Guard variable for pool-wide/cross-asset re-entrancy checks
     bool internal _notEntered;

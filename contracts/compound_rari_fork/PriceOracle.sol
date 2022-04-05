@@ -13,4 +13,12 @@ contract PriceOracle {
      *  Zero means the price is unavailable.
      */
     function getUnderlyingPrice(CToken cToken) external view returns (uint256);
+
+    /**
+     * @notice Get the price of an underlying asset
+     * @param underlying underlying to get the price of
+     * @return The underlying asset price mantissa (scaled by 1e18).
+     *  Zero means the price is unavailable.
+     */
+    function price(address underlying) external view returns (uint256);
 }

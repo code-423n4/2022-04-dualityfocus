@@ -2,10 +2,6 @@ pragma solidity ^0.5.16;
 
 import "./CToken.sol";
 
-interface CompLike {
-    function delegate(address delegatee) external;
-}
-
 /**
  * @title Compound's CErc20 Contract
  * @notice CTokens which wrap an EIP-20 underlying
@@ -27,8 +23,7 @@ contract CErc20 is CToken, CErc20Interface {
         InterestRateModel interestRateModel_,
         string memory name_,
         string memory symbol_,
-        uint256 reserveFactorMantissa_,
-        uint256 adminFeeMantissa_
+        uint256 reserveFactorMantissa_
     ) public {
         // CToken initialize does the bulk of the work
         uint256 initialExchangeRateMantissa_ = 0.2e18;
@@ -40,8 +35,7 @@ contract CErc20 is CToken, CErc20Interface {
             name_,
             symbol_,
             decimals_,
-            reserveFactorMantissa_,
-            adminFeeMantissa_
+            reserveFactorMantissa_
         );
 
         // Set underlying and sanity check it
@@ -129,6 +123,26 @@ contract CErc20 is CToken, CErc20Interface {
         return err;
     }
 
+
+    /**
+     * @notice A public function to sweep accidental ERC-20 transfers to this contract. Tokens are sent to admin
+     * @param token The address of the ERC-20 token to sweep
+     */
+    function sweepToken(EIP20NonStandardInterface token) external {
+        require(address(token) != underlying, "CErc20::sweepToken: can not sweep underlying token");
+        uint256 balance = token.balanceOf(address(this));
+        token.transfer(admin, balance);
+    }
+
+    /**
+     * @notice The sender adds to reserves.
+     * @param addAmount The amount fo underlying token to add as reserves
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _addReserves(uint256 addAmount) external returns (uint256) {
+        return _addReservesInternal(addAmount);
+    }
+
     /*** Safe Token ***/
 
     /**
@@ -193,15 +207,5 @@ contract CErc20 is CToken, CErc20Interface {
     function _callOptionalReturn(bytes memory data, string memory errorMessage) internal {
         bytes memory returndata = _functionCall(underlying, data, errorMessage);
         if (returndata.length > 0) require(abi.decode(returndata, (bool)), errorMessage);
-    }
-
-    /**
-     * @notice Admin call to delegate the votes of the COMP-like underlying
-     * @param compLikeDelegatee The address to delegate votes to
-     * @dev CTokens whose underlying are not CompLike should revert here
-     */
-    function _delegateCompLikeTo(address compLikeDelegatee) external {
-        require(hasAdminRights(), "only the admin may set the comp-like delegate");
-        CompLike(underlying).delegate(compLikeDelegatee);
     }
 }

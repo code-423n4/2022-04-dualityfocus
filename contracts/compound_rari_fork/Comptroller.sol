@@ -8,7 +8,6 @@ import "./PriceOracle.sol";
 import "./ComptrollerInterface.sol";
 import "./ComptrollerStorage.sol";
 import "./Unitroller.sol";
-import "./RewardsDistributorDelegate.sol";
 
 /**
  * @title Compound's Comptroller Contract
@@ -47,13 +46,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     event ActionPaused(string action, bool pauseState);
 
     /// @notice Emitted when an action is paused on a market
-    event ActionPaused(CToken cToken, string action, bool pauseState);
-
-    /// @notice Emitted when the whitelist enforcement is changed
-    event WhitelistEnforcementChanged(bool enforce);
-
-    /// @notice Emitted when auto implementations are toggled
-    event AutoImplementationsToggled(bool enabled);
+    event ActionPausedMarket(CToken cToken, string action, bool pauseState);
 
     /// @notice Emitted when supply cap for a cToken is changed
     event NewSupplyCap(CToken indexed cToken, uint256 newSupplyCap);
@@ -81,6 +74,12 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
     // liquidationIncentiveMantissa must be no greater than this value
     uint256 internal constant liquidationIncentiveMaxMantissa = 1.5e18; // 1.5
+
+    constructor (address _admin) public {
+        admin = _admin;
+        _notEntered = true;
+        _notEnteredInitialized = true;    
+    }
 
     /*** Assets You Are In ***/
 
@@ -256,9 +255,19 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return uint256(Error.MARKET_NOT_LISTED);
         }
 
-        // Make sure minter is whitelisted
-        if (enforceWhitelist && !whitelist[minter]) {
-            return uint256(Error.SUPPLIER_NOT_WHITELISTED);
+        // deposits are automatically treated as collateral
+        if (!markets[cToken].accountMembership[minter]) {
+            // only cTokens may call mintAllowed if minter not in market
+            require(msg.sender == cToken, "sender must be cToken");
+
+            // attempt to add minter to the market
+            Error err = addToMarketInternal(CToken(msg.sender), minter);
+            if (err != Error.NO_ERROR) {
+                return uint256(err);
+            }
+
+            // it should be impossible to break the important invariant
+            assert(markets[cToken].accountMembership[minter]);
         }
 
         // Check supply cap
@@ -268,15 +277,9 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             uint256 totalCash = CToken(cToken).getCash();
             uint256 totalBorrows = CToken(cToken).totalBorrows();
             uint256 totalReserves = CToken(cToken).totalReserves();
-            uint256 totalFuseFees = CToken(cToken).totalFuseFees();
-            uint256 totalAdminFees = CToken(cToken).totalAdminFees();
 
-            // totalUnderlyingSupply = totalCash + totalBorrows - (totalReserves + totalFuseFees + totalAdminFees)
-            (MathError mathErr, uint256 totalUnderlyingSupply) = addThenSubUInt(
-                totalCash,
-                totalBorrows,
-                add_(add_(totalReserves, totalFuseFees), totalAdminFees)
-            );
+            // totalUnderlyingSupply = totalCash + totalBorrows - (totalReserves)
+            (MathError mathErr, uint256 totalUnderlyingSupply) = addThenSubUInt(totalCash, totalBorrows, totalReserves);
             if (mathErr != MathError.NO_ERROR) return uint256(Error.MATH_ERROR);
 
             uint256 nextTotalUnderlyingSupply;
@@ -286,38 +289,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             require(nextTotalUnderlyingSupply < supplyCap, "market supply cap reached");
         }
 
-        // Keep the flywheel moving
-        flywheelPreSupplierAction(cToken, minter);
-
         return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Validates mint and reverts on rejection. May emit logs.
-     * @param cToken Asset being minted
-     * @param minter The address minting the tokens
-     * @param actualMintAmount The amount of the underlying asset being minted
-     * @param mintTokens The number of tokens being minted
-     */
-    function mintVerify(
-        address cToken,
-        address minter,
-        uint256 actualMintAmount,
-        uint256 mintTokens
-    ) external {
-        // Shh - currently unused
-        cToken;
-        minter;
-        actualMintAmount;
-        mintTokens;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
-
-        // Add minter to suppliers mapping
-        suppliers[minter] = true;
     }
 
     /**
@@ -336,9 +308,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         if (allowed != uint256(Error.NO_ERROR)) {
             return allowed;
         }
-
-        // Keep the flywheel moving
-        flywheelPreSupplierAction(cToken, redeemer);
 
         return uint256(Error.NO_ERROR);
     }
@@ -436,11 +405,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return uint256(Error.PRICE_ERROR);
         }
 
-        // Make sure borrower is whitelisted
-        if (enforceWhitelist && !whitelist[borrower]) {
-            return uint256(Error.SUPPLIER_NOT_WHITELISTED);
-        }
-
         // Check borrow cap
         uint256 borrowCap = borrowCaps[cToken];
         // Borrow cap of 0 corresponds to unlimited borrowing
@@ -450,9 +414,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             if (mathErr != MathError.NO_ERROR) return uint256(Error.MATH_ERROR);
             require(nextTotalBorrows < borrowCap, "market borrow cap reached");
         }
-
-        // Keep the flywheel moving
-        flywheelPreBorrowerAction(cToken, borrower);
 
         // Perform a hypothetical liquidity check to guard against shortfall
         (Error err, , uint256 shortfall) = getHypotheticalAccountLiquidityInternal(
@@ -469,72 +430,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         }
 
         return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Checks if the account should be allowed to borrow the underlying asset of the given market
-     * @param cToken Asset whose underlying is being borrowed
-     * @param accountBorrowsNew The user's new borrow balance of the underlying asset
-     */
-    function borrowWithinLimits(address cToken, uint256 accountBorrowsNew) external returns (uint256) {
-        // Check if min borrow exists
-        uint256 minBorrowEth = fuseAdmin.minBorrowEth();
-
-        if (minBorrowEth > 0) {
-            // Get new underlying borrow balance of account for this cToken
-            uint256 oraclePriceMantissa = oracle.getUnderlyingPrice(CToken(cToken));
-            if (oraclePriceMantissa == 0) return uint256(Error.PRICE_ERROR);
-            (MathError mathErr, uint256 borrowBalanceEth) = mulScalarTruncate(
-                Exp({ mantissa: oraclePriceMantissa }),
-                accountBorrowsNew
-            );
-            if (mathErr != MathError.NO_ERROR) return uint256(Error.MATH_ERROR);
-
-            // Check against min borrow
-            if (borrowBalanceEth < minBorrowEth) return uint256(Error.BORROW_BELOW_MIN);
-        }
-
-        // Return no error
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Checks if the account should be allowed to borrow the underlying asset of the given market
-     * @param cToken Asset whose underlying is being borrowed
-     * @param exchangeRateMantissa Underlying/cToken exchange rate
-     * @param accountTokens Initial account cToken balance
-     * @param accountTokens Underlying amount to mint
-     */
-    function mintWithinLimits(
-        address cToken,
-        uint256 exchangeRateMantissa,
-        uint256 accountTokens,
-        uint256 mintAmount
-    ) external returns (uint256) {
-        // Return no error
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Validates borrow and reverts on rejection. May emit logs.
-     * @param cToken Asset whose underlying is being borrowed
-     * @param borrower The address borrowing the underlying
-     * @param borrowAmount The amount of the underlying asset requested to borrow
-     */
-    function borrowVerify(
-        address cToken,
-        address borrower,
-        uint256 borrowAmount
-    ) external {
-        // Shh - currently unused
-        cToken;
-        borrower;
-        borrowAmount;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
     }
 
     /**
@@ -561,37 +456,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return uint256(Error.MARKET_NOT_LISTED);
         }
 
-        // Keep the flywheel moving
-        flywheelPreBorrowerAction(cToken, borrower);
-
         return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Validates repayBorrow and reverts on rejection. May emit logs.
-     * @param cToken Asset being repaid
-     * @param payer The address repaying the borrow
-     * @param borrower The address of the borrower
-     * @param actualRepayAmount The amount of underlying being repaid
-     */
-    function repayBorrowVerify(
-        address cToken,
-        address payer,
-        address borrower,
-        uint256 actualRepayAmount,
-        uint256 borrowerIndex
-    ) external {
-        // Shh - currently unused
-        cToken;
-        payer;
-        borrower;
-        actualRepayAmount;
-        borrowerIndex;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
     }
 
     /**
@@ -645,36 +510,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     /**
-     * @notice Validates liquidateBorrow and reverts on rejection. May emit logs.
-     * @param cTokenBorrowed Asset which was borrowed by the borrower
-     * @param cTokenCollateral Asset which was used as collateral and will be seized
-     * @param liquidator The address repaying the borrow and seizing the collateral
-     * @param borrower The address of the borrower
-     * @param actualRepayAmount The amount of underlying being repaid
-     */
-    function liquidateBorrowVerify(
-        address cTokenBorrowed,
-        address cTokenCollateral,
-        address liquidator,
-        address borrower,
-        uint256 actualRepayAmount,
-        uint256 seizeTokens
-    ) external {
-        // Shh - currently unused
-        cTokenBorrowed;
-        cTokenCollateral;
-        liquidator;
-        borrower;
-        actualRepayAmount;
-        seizeTokens;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
-    }
-
-    /**
      * @notice Checks if the seizing of assets should be allowed to occur
      * @param cTokenCollateral Asset which was used as collateral and will be seized
      * @param cTokenBorrowed Asset which was borrowed by the borrower
@@ -707,38 +542,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return uint256(Error.COMPTROLLER_MISMATCH);
         }
 
-        // Keep the flywheel moving
-        flywheelPreTransferAction(cTokenCollateral, borrower, liquidator);
-
         return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Validates seize and reverts on rejection. May emit logs.
-     * @param cTokenCollateral Asset which was used as collateral and will be seized
-     * @param cTokenBorrowed Asset which was borrowed by the borrower
-     * @param liquidator The address repaying the borrow and seizing the collateral
-     * @param borrower The address of the borrower
-     * @param seizeTokens The number of collateral tokens to seize
-     */
-    function seizeVerify(
-        address cTokenCollateral,
-        address cTokenBorrowed,
-        address liquidator,
-        address borrower,
-        uint256 seizeTokens
-    ) external {
-        // Shh - currently unused
-        cTokenCollateral;
-        cTokenBorrowed;
-        liquidator;
-        borrower;
-        seizeTokens;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
     }
 
     /**
@@ -765,72 +569,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return allowed;
         }
 
-        // Keep the flywheel moving
-        flywheelPreTransferAction(cToken, src, dst);
-
         return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Validates transfer and reverts on rejection. May emit logs.
-     * @param cToken Asset being transferred
-     * @param src The account which sources the tokens
-     * @param dst The account which receives the tokens
-     * @param transferTokens The number of cTokens to transfer
-     */
-    function transferVerify(
-        address cToken,
-        address src,
-        address dst,
-        uint256 transferTokens
-    ) external {
-        // Shh - currently unused
-        cToken;
-        src;
-        dst;
-        transferTokens;
-
-        // Shh - we don't ever want this hook to be marked pure
-        if (false) {
-            maxAssets = maxAssets;
-        }
-    }
-
-    /*** Flywheel Hooks ***/
-
-    /**
-     * @notice Keeps the flywheel moving pre-mint and pre-redeem
-     * @param cToken The relevant market
-     * @param supplier The minter/redeemer
-     */
-    function flywheelPreSupplierAction(address cToken, address supplier) internal {
-        for (uint256 i = 0; i < rewardsDistributors.length; i++)
-            RewardsDistributorDelegate(rewardsDistributors[i]).flywheelPreSupplierAction(cToken, supplier);
-    }
-
-    /**
-     * @notice Keeps the flywheel moving pre-borrow and pre-repay
-     * @param cToken The relevant market
-     * @param borrower The borrower
-     */
-    function flywheelPreBorrowerAction(address cToken, address borrower) internal {
-        for (uint256 i = 0; i < rewardsDistributors.length; i++)
-            RewardsDistributorDelegate(rewardsDistributors[i]).flywheelPreBorrowerAction(cToken, borrower);
-    }
-
-    /**
-     * @notice Keeps the flywheel moving pre-transfer and pre-seize
-     * @param cToken The relevant market
-     * @param src The account which sources the tokens
-     * @param dst The account which receives the tokens
-     */
-    function flywheelPreTransferAction(
-        address cToken,
-        address src,
-        address dst
-    ) internal {
-        for (uint256 i = 0; i < rewardsDistributors.length; i++)
-            RewardsDistributorDelegate(rewardsDistributors[i]).flywheelPreTransferAction(cToken, src, dst);
     }
 
     /*** Liquidity/Liquidation Calculations ***/
@@ -1066,100 +805,13 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     /*** Admin Functions ***/
 
     /**
-     * @notice Add a RewardsDistributor contracts.
-     * @dev Admin function to add a RewardsDistributor contract
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function _addRewardsDistributor(address distributor) external returns (uint256) {
-        // Check caller is admin
-        if (!hasAdminRights()) {
-            return fail(Error.UNAUTHORIZED, FailureInfo.ADD_REWARDS_DISTRIBUTOR_OWNER_CHECK);
-        }
-
-        // Check marker method
-        require(RewardsDistributorDelegate(distributor).isRewardsDistributor(), "marker method returned false");
-
-        // Check for existing RewardsDistributor
-        for (uint256 i = 0; i < rewardsDistributors.length; i++)
-            require(distributor != rewardsDistributors[i], "RewardsDistributor contract already added");
-
-        // Add RewardsDistributor to array
-        rewardsDistributors.push(distributor);
-        emit AddedRewardsDistributor(distributor);
-
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Sets the whitelist enforcement for the comptroller
-     * @dev Admin function to set a new whitelist enforcement boolean
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function _setWhitelistEnforcement(bool enforce) external returns (uint256) {
-        // Check caller is admin
-        if (!hasAdminRights()) {
-            return fail(Error.UNAUTHORIZED, FailureInfo.SET_WHITELIST_ENFORCEMENT_OWNER_CHECK);
-        }
-
-        // Check if `enforceWhitelist` already equals `enforce`
-        if (enforceWhitelist == enforce) {
-            return uint256(Error.NO_ERROR);
-        }
-
-        // Set comptroller's `enforceWhitelist` to `enforce`
-        enforceWhitelist = enforce;
-
-        // Emit WhitelistEnforcementChanged(bool enforce);
-        emit WhitelistEnforcementChanged(enforce);
-
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Sets the whitelist `statuses` for `suppliers`
-     * @dev Admin function to set the whitelist `statuses` for `suppliers`
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function _setWhitelistStatuses(address[] calldata suppliers, bool[] calldata statuses) external returns (uint256) {
-        // Check caller is admin
-        if (!hasAdminRights()) {
-            return fail(Error.UNAUTHORIZED, FailureInfo.SET_WHITELIST_STATUS_OWNER_CHECK);
-        }
-
-        // Set whitelist statuses for suppliers
-        for (uint256 i = 0; i < suppliers.length; i++) {
-            address supplier = suppliers[i];
-
-            if (statuses[i]) {
-                // If not already whitelisted, add to whitelist
-                if (!whitelist[supplier]) {
-                    whitelist[supplier] = true;
-                    whitelistArray.push(supplier);
-                    whitelistIndexes[supplier] = whitelistArray.length - 1;
-                }
-            } else {
-                // If whitelisted, remove from whitelist
-                if (whitelist[supplier]) {
-                    whitelistArray[whitelistIndexes[supplier]] = whitelistArray[whitelistArray.length - 1]; // Copy last item in list to location of item to be removed
-                    whitelistArray.length--; // Reduce length by 1
-                    whitelistIndexes[whitelistArray[whitelistIndexes[supplier]]] = whitelistIndexes[supplier]; // Set whitelist index of moved item to correct index
-                    whitelistIndexes[supplier] = 0; // Reset supplier whitelist index to 0 for a gas refund
-                    whitelist[supplier] = false; // Tell the contract that the supplier is no longer whitelisted
-                }
-            }
-        }
-
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
      * @notice Sets a new price oracle for the comptroller
      * @dev Admin function to set a new price oracle
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function _setPriceOracle(PriceOracle newOracle) public returns (uint256) {
         // Check caller is admin
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_PRICE_ORACLE_OWNER_CHECK);
         }
 
@@ -1183,7 +835,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function _setCloseFactor(uint256 newCloseFactorMantissa) external returns (uint256) {
         // Check caller is admin
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_CLOSE_FACTOR_OWNER_CHECK);
         }
 
@@ -1216,9 +868,9 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * @param newCollateralFactorMantissa The new collateral factor, scaled by 1e18
      * @return uint 0=success, otherwise a failure. (See ErrorReporter for details)
      */
-    function _setCollateralFactor(CToken cToken, uint256 newCollateralFactorMantissa) public returns (uint256) {
+    function _setCollateralFactor(CToken cToken, uint256 newCollateralFactorMantissa) external returns (uint256) {
         // Check caller is admin
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_COLLATERAL_FACTOR_OWNER_CHECK);
         }
 
@@ -1259,7 +911,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function _setLiquidationIncentive(uint256 newLiquidationIncentiveMantissa) external returns (uint256) {
         // Check caller is admin
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_LIQUIDATION_INCENTIVE_OWNER_CHECK);
         }
 
@@ -1293,9 +945,9 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * @param cToken The address of the market (token) to list
      * @return uint 0=success, otherwise a failure. (See enum Error for details)
      */
-    function _supportMarket(CToken cToken) internal returns (uint256) {
+    function _supportMarket(CToken cToken) external returns (uint256) {
         // Check caller is admin
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SUPPORT_MARKET_OWNER_CHECK);
         }
 
@@ -1314,7 +966,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         );
 
         // Make sure market is not already listed
-        address underlying = cToken.isCEther() ? address(0) : CErc20(address(cToken)).underlying();
+        address underlying = CErc20(address(cToken)).underlying();
 
         if (address(cTokensByUnderlying[underlying]) != address(0)) {
             return fail(Error.MARKET_ALREADY_LISTED, FailureInfo.SUPPORT_MARKET_EXISTS);
@@ -1330,40 +982,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     /**
-     * @notice Deploy cToken, add the market to the markets mapping, and set it as listed and set the collateral factor
-     * @dev Admin function to deploy cToken, set isListed, and add support for the market and set the collateral factor
-     * @return uint 0=success, otherwise a failure. (See enum Error for details)
-     */
-    function _deployMarket(
-        bool isCEther,
-        bytes calldata constructorData,
-        uint256 collateralFactorMantissa
-    ) external returns (uint256) {
-        // Check caller is admin
-        if (!hasAdminRights()) {
-            return fail(Error.UNAUTHORIZED, FailureInfo.SUPPORT_MARKET_OWNER_CHECK);
-        }
-
-        // Temporarily enable Fuse admin rights for asset deployment (storing the original value)
-        bool oldFuseAdminHasRights = fuseAdminHasRights;
-        fuseAdminHasRights = true;
-
-        // Deploy via Fuse admin
-        CToken cToken = CToken(
-            isCEther ? fuseAdmin.deployCEther(constructorData) : fuseAdmin.deployCErc20(constructorData)
-        );
-
-        // Reset Fuse admin rights to the original value
-        fuseAdminHasRights = oldFuseAdminHasRights;
-
-        // Support market here in the Comptroller
-        uint256 err = _supportMarket(cToken);
-
-        // Set collateral factor
-        return err == uint256(Error.NO_ERROR) ? _setCollateralFactor(cToken, collateralFactorMantissa) : err;
-    }
-
-    /**
      * @notice Removed a market from the markets mapping and sets it as unlisted
      * @dev Admin function unset isListed and collateralFactorMantissa and unadd support for the market
      * @param cToken The address of the market (token) to unlist
@@ -1371,7 +989,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function _unsupportMarket(CToken cToken) external returns (uint256) {
         // Check admin rights
-        if (!hasAdminRights()) return fail(Error.UNAUTHORIZED, FailureInfo.UNSUPPORT_MARKET_OWNER_CHECK);
+        if (msg.sender != admin) return fail(Error.UNAUTHORIZED, FailureInfo.UNSUPPORT_MARKET_OWNER_CHECK);
 
         // Check if market is already unlisted
         if (!markets[address(cToken)].isListed)
@@ -1402,30 +1020,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         allMarkets[assetIndex] = allMarkets[allMarkets.length - 1];
         allMarkets.length--;
 
-        cTokensByUnderlying[cToken.isCEther() ? address(0) : CErc20(address(cToken)).underlying()] = CToken(address(0));
+        cTokensByUnderlying[CErc20(address(cToken)).underlying()] = CToken(address(0));
         emit MarketUnlisted(cToken);
-
-        return uint256(Error.NO_ERROR);
-    }
-
-    /**
-     * @notice Toggles the auto-implementation feature
-     * @param enabled If the feature is to be enabled
-     * @return uint 0=success, otherwise a failure. (See enum Error for details)
-     */
-    function _toggleAutoImplementations(bool enabled) public returns (uint256) {
-        if (!hasAdminRights()) {
-            return fail(Error.UNAUTHORIZED, FailureInfo.TOGGLE_AUTO_IMPLEMENTATIONS_ENABLED_OWNER_CHECK);
-        }
-
-        // Return no error if already set to the desired value
-        if (autoImplementation == enabled) return uint256(Error.NO_ERROR);
-
-        // Store autoImplementation with value enabled
-        autoImplementation = enabled;
-
-        // Emit AutoImplementationsToggled(enabled)
-        emit AutoImplementationsToggled(enabled);
 
         return uint256(Error.NO_ERROR);
     }
@@ -1499,7 +1095,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * @return uint 0=success, otherwise a failure. (See enum Error for details)
      */
     function _setPauseGuardian(address newPauseGuardian) public returns (uint256) {
-        if (!hasAdminRights()) {
+        if (msg.sender != admin) {
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_PAUSE_GUARDIAN_OWNER_CHECK);
         }
 
@@ -1517,27 +1113,27 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
     function _setMintPaused(CToken cToken, bool state) public returns (bool) {
         require(markets[address(cToken)].isListed, "cannot pause a market that is not listed");
-        require(msg.sender == pauseGuardian || hasAdminRights(), "only pause guardian and admin can pause");
-        require(hasAdminRights() || state == true, "only admin can unpause");
+        require(msg.sender == pauseGuardian || msg.sender == admin, "only pause guardian and admin can pause");
+        require(msg.sender == admin || state == true, "only admin can unpause");
 
         mintGuardianPaused[address(cToken)] = state;
-        emit ActionPaused(cToken, "Mint", state);
+        emit ActionPausedMarket(cToken, "Mint", state);
         return state;
     }
 
     function _setBorrowPaused(CToken cToken, bool state) public returns (bool) {
         require(markets[address(cToken)].isListed, "cannot pause a market that is not listed");
-        require(msg.sender == pauseGuardian || hasAdminRights(), "only pause guardian and admin can pause");
-        require(hasAdminRights() || state == true, "only admin can unpause");
+        require(msg.sender == pauseGuardian || msg.sender == admin, "only pause guardian and admin can pause");
+        require(msg.sender == admin || state == true, "only admin can unpause");
 
         borrowGuardianPaused[address(cToken)] = state;
-        emit ActionPaused(cToken, "Borrow", state);
+        emit ActionPausedMarket(cToken, "Borrow", state);
         return state;
     }
 
     function _setTransferPaused(bool state) public returns (bool) {
-        require(msg.sender == pauseGuardian || hasAdminRights(), "only pause guardian and admin can pause");
-        require(hasAdminRights() || state == true, "only admin can unpause");
+        require(msg.sender == pauseGuardian || msg.sender == admin, "only pause guardian and admin can pause");
+        require(msg.sender == admin || state == true, "only admin can unpause");
 
         transferGuardianPaused = state;
         emit ActionPaused("Transfer", state);
@@ -1545,8 +1141,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     function _setSeizePaused(bool state) public returns (bool) {
-        require(msg.sender == pauseGuardian || hasAdminRights(), "only pause guardian and admin can pause");
-        require(hasAdminRights() || state == true, "only admin can unpause");
+        require(msg.sender == pauseGuardian || msg.sender == admin, "only pause guardian and admin can pause");
+        require(msg.sender == admin || state == true, "only admin can unpause");
 
         seizeGuardianPaused = state;
         emit ActionPaused("Seize", state);
@@ -1554,14 +1150,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     function _become(Unitroller unitroller) public {
-        require(
-            (msg.sender == address(fuseAdmin) && unitroller.fuseAdminHasRights()) ||
-                (msg.sender == unitroller.admin() && unitroller.adminHasRights()),
-            "only unitroller admin can change brains"
-        );
-
-        uint256 changeStatus = unitroller._acceptImplementation();
-        require(changeStatus == 0, "change not authorized");
+        require(msg.sender == unitroller.admin(), "only unitroller admin can change brains");
+        require(unitroller._acceptImplementation() == 0, "change not authorized");
 
         Comptroller(address(unitroller))._becomeImplementation();
     }
@@ -1596,22 +1186,6 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     /**
-     * @notice Return all of the whitelist
-     * @dev The automatic getter may be used to access an individual whitelist status.
-     * @return The list of borrower account addresses
-     */
-    function getWhitelist() external view returns (address[] memory) {
-        return whitelistArray;
-    }
-
-    /**
-     * @notice Returns an array of all RewardsDistributors
-     */
-    function getRewardsDistributors() external view returns (address[] memory) {
-        return rewardsDistributors;
-    }
-
-    /**
      * @notice Returns true if the given cToken market has been deprecated
      * @dev All borrows in a deprecated cToken market can be immediately liquidated
      * @param cToken The market to check if deprecated
@@ -1620,7 +1194,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         return
             markets[address(cToken)].collateralFactorMantissa == 0 &&
             borrowGuardianPaused[address(cToken)] == true &&
-            add_(add_(cToken.reserveFactorMantissa(), cToken.adminFeeMantissa()), cToken.fuseFeeMantissa()) == 1e18;
+            cToken.reserveFactorMantissa() == 1e18;
     }
 
     /*** Pool-Wide/Cross-Asset Reentrancy Prevention ***/

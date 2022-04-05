@@ -86,11 +86,18 @@ At a high level, our contracts consist of:
 - Oracle contract that supports Uniswap V3 ranges.
 
 The commit log reflects these changes and we recommend using commits to understand the changes we have introduced to Rari/Compound. We describe them below:
+<br>
+<br>
 [COMMIT 1]: Adds all of the non-contract files of our repo
+<br>
 [COMMIT 2]: Add Rari Fork (no changes yet). We add only the files we utilize, and we add them in their original form. You can assume that these files are mostly safe at this stage.
+<br>
 [COMMIT 3]: Add a couple files we need from compound, and clean up our compound/rari fork by removing unnecessary code and shift to a simpler admin model.
+<br>
 [COMMIT 4]: Add Focus specific changes to our compound/rari fork. This includes functions for both valuing and liquidating LP NFTs
+<br>
 [COMMIT 5]: Add all 0.7.6 code: includes our LP Vault and oracles, along with the internal/external libraries they call. 
+<br>
 [COMMIT 6]: Add contracts for tests/mocks
 
 

@@ -1,36 +1,3 @@
-# ✨ So you want to sponsor a contest
-
-This `README.md` contains a set of checklists for our contest collaboration.
-
-Your contest will use two repos: 
-- **a _contest_ repo** (this one), which is used for scoping your contest and for providing information to contestants (wardens)
-- **a _findings_ repo**, where issues are submitted. 
-
-Ultimately, when we launch the contest, this contest repo will be made public and will contain the smart contracts to be reviewed and all the information needed for contest participants. The findings repo will be made public after the contest is over and your team has mitigated the identified issues.
-
-Some of the checklists in this doc are for **C4 (🐺)** and some of them are for **you as the contest sponsor (⭐️)**.
-
----
-
-# Contest setup
-
-## ⭐️ Sponsor: Provide contest details
-
-Under "SPONSORS ADD INFO HERE" heading below, include the following:
-
-- [ ] Name of each contract and:
-  - [ ] source lines of code (excluding blank lines and comments) in each
-  - [ ] external contracts called in each
-  - [ ] libraries used in each
-- [ ] Describe any novel or unique curve logic or mathematical models implemented in the contracts
-- [ ] Does the token conform to the ERC-20 standard? In what specific ways does it differ?
-- [ ] Describe anything else that adds any special logic that makes your approach unique
-- [ ] Identify any areas of specific concern in reviewing the code
-- [ ] Add all of the code to this repo that you want reviewed
-- [ ] Create a PR to this repo with the above changes.
-
----
-
 # Contest prep
 
 ## 🐺 C4: Contest prep
@@ -42,16 +9,6 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 - [ ] Move any relevant information in "contest scope information" above to the bottom of this readme.
 - [ ] Add matching info to the [code423n4.com public contest data here](https://github.com/code-423n4/code423n4.com/blob/main/_data/contests/contests.csv))
 - [ ] Delete this checklist.
-
-## ⭐️ Sponsor: Contest prep
-- [ ] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
-- [X] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
-- [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 8 hours prior to contest start time.**
-- [X] Ensure that you have access to the _findings_ repo where issues will be submitted.
-- [X] Promote the contest on Twitter (optional: tag in relevant protocols, etc.)
-- [X] Share it with your own communities (blog, Discord, Telegram, email newsletters, etc.)
-- [ ] Optional: pre-record a high-level overview of your protocol (not just specific smart contract functions). This saves wardens a lot of time wading through documentation.
-- [ ] Delete this checklist and all text above the line below when you're ready.
 
 ---
 
@@ -68,8 +25,6 @@ This repo will be made public before the start of the contest. (C4 delete this l
 
 # Contest Scope
 
-
-
 The following contracts are in scope (with their line counts):
 | File | statements | branches | functions | Lines (excluding global variable declarations, function signatures , run over lines and event definitions) |
 | -------------------- | ---------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------- |
@@ -85,7 +40,7 @@ The following contracts are in scope (with their line counts):
 
 <br>
 
-all libraries used in the above contracts are also within scope, especially those written by Duality (contracts/libs). Below is an outline of contract external and library dependencies.
+All libraries used in the above contracts are also within scope, especially those written by Duality (contracts/libs). Below is an outline of contract external and library dependencies.
 
 #### CErc20.sol
 - External Called Contracts: CToken.sol
@@ -134,7 +89,7 @@ The commit log reflects these changes and we recommend using commits to understa
 [COMMIT 6]: Add contracts for tests/mocks
 
 
-More information on contracts can be found here [**TODO: link to contracts readme**]. Please also refer to our Gitbook docs linked below.
+More information on contracts can be found in [the contracts README](https://github.com/code-423n4/2022-04-dualityfocus/blob/e4bc33c0eb6be79bf1346b4a6c50b3e18964b589/contracts/README.md). Please also refer to our Gitbook docs linked below.
 
 ## Known Issues/Tradeoffs
 - **Uniswap V3 TWAP manipulation**
@@ -150,21 +105,20 @@ More information on contracts can be found here [**TODO: link to contracts readm
 To install necessary libraries and build our types:
 
 ```
-$ yarn install && yarn typechain
+yarn install && yarn typechain
 ```
 
 To compile contracts:
 
 ```
-$ yarn compile
+yarn compile
 ```
 
 And to run tests:
 
 ```
-$ yarn test
+yarn test
 ```
-
 
 # Resources
 ## Duality Links

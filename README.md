@@ -109,7 +109,7 @@ yarn test
 - [Blog](https://mirror.xyz/0x426D702b3ECc4a2f50E575413f20642bbDB8965e)
 - [Gitbook](https://dualitylabs.gitbook.io/duality/)
 - [Website](https://www.dualityfi.xyz/)
-- [Discord](discord.gg/nDRCdF6Bnc)
+- [Discord](https://discord.gg/nDRCdF6Bnc)
 - [Twitter](https://twitter.com/DualityFi)
 ## Other Links
 - [Compound Docs](https://compound.finance/docs)

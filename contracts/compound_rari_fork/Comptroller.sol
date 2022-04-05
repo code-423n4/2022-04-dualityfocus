@@ -8,6 +8,7 @@ import "./PriceOracle.sol";
 import "./ComptrollerInterface.sol";
 import "./ComptrollerStorage.sol";
 import "./Unitroller.sol";
+import "./external/IUniV3LpVault.sol";
 
 /**
  * @title Compound's Comptroller Contract
@@ -39,6 +40,12 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     /// @notice Emitted when price oracle is changed
     event NewPriceOracle(PriceOracle oldPriceOracle, PriceOracle newPriceOracle);
 
+    /// @notice Emitted when tick oracle is changed
+    event NewTickOracle(TickOracle oldTickOracle, TickOracle newTickOracle);
+
+    /// @notice Emitted when UniV3LpVault is changed
+    event NewUniV3LpVault(IUniV3LpVault oldVault, IUniV3LpVault newVault);
+
     /// @notice Emitted when pause guardian is changed
     event NewPauseGuardian(address oldPauseGuardian, address newPauseGuardian);
 
@@ -56,11 +63,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
     /// @notice Emitted when borrow cap guardian is changed
     event NewBorrowCapGuardian(address oldBorrowCapGuardian, address newBorrowCapGuardian);
-
-    /// @notice Emitted when a new RewardsDistributor contract is added to hooks
-    event AddedRewardsDistributor(address rewardsDistributor);
-
-    // closeFactorMantissa must be strictly greater than this value
+     // closeFactorMantissa must be strictly greater than this value
     uint256 internal constant closeFactorMinMantissa = 0.05e18; // 0.05
 
     // closeFactorMantissa must not exceed this value
@@ -510,6 +513,58 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     }
 
     /**
+     * @notice Checks if the liquidation should be allowed to occur
+     * @param cTokenBorrowed Asset which was borrowed by the borrower
+     * @param collateralTokenId the tokenId of the Uni V3 NFT being used as collateral
+     * @param liquidator The address repaying the borrow and seizing the collateral
+     * @param borrower The address of the borrower
+     * @param repayAmount The amount of underlying being repaid
+     */
+    function liquidateBorrowUniV3Allowed(
+        address cTokenBorrowed,
+        uint256 collateralTokenId,
+        address liquidator,
+        address borrower,
+        uint256 repayAmount
+    ) external returns (uint256) {
+        // Shh - currently unused
+        collateralTokenId;
+        liquidator;
+
+        if (!markets[cTokenBorrowed].isListed) {
+            return uint256(Error.MARKET_NOT_LISTED);
+        }
+
+        if (uniV3LpVault.ownerOf(collateralTokenId) != borrower) {
+            return uint256(Error.TOKEN_ID_BORROWER_MISMATCH);
+        }
+
+        uint256 borrowBalance = CToken(cTokenBorrowed).borrowBalanceStored(borrower);
+
+        /* allow accounts to be liquidated if the market is deprecated */
+        if (isDeprecated(CToken(cTokenBorrowed))) {
+            require(borrowBalance >= repayAmount, "Can not repay more than the total borrow");
+        } else {
+            /* The borrower must have shortfall in order to be liquidatable */
+            (Error err, , uint256 shortfall) = getAccountLiquidityInternal(borrower);
+            if (err != Error.NO_ERROR) {
+                return uint256(err);
+            }
+
+            if (shortfall == 0) {
+                return uint256(Error.INSUFFICIENT_SHORTFALL);
+            }
+
+            /* The liquidator may not repay more than what is allowed by the closeFactor */
+            uint256 maxClose = mul_ScalarTruncate(Exp({ mantissa: closeFactorMantissa }), borrowBalance);
+            if (repayAmount > maxClose) {
+                return uint256(Error.TOO_MUCH_REPAY);
+            }
+        }
+        return uint256(Error.NO_ERROR);
+    }
+
+    /**
      * @notice Checks if the seizing of assets should be allowed to occur
      * @param cTokenCollateral Asset which was used as collateral and will be seized
      * @param cTokenBorrowed Asset which was borrowed by the borrower
@@ -539,6 +594,46 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
         // Make sure cToken Comptrollers are identical
         if (CToken(cTokenCollateral).comptroller() != CToken(cTokenBorrowed).comptroller()) {
+            return uint256(Error.COMPTROLLER_MISMATCH);
+        }
+
+        return uint256(Error.NO_ERROR);
+    }
+
+    /**
+     * new seize function for Uni V3 vault
+     */
+    function seizeAllowedUniV3(
+        address lpVault,
+        address cTokenBorrowed,
+        address liquidator,
+        address borrower,
+        uint256 tokenId,
+        uint256 seizeFeesToken0,
+        uint256 seizeFeesToken1,
+        uint256 seizeLiquidity
+    ) external returns (uint256) {
+        // Pausing is a very serious situation - we revert to sound the alarms
+        require(!seizeGuardianPaused, "seize is paused");
+
+        // Shh - currently unused
+        tokenId;
+        seizeFeesToken0;
+        seizeFeesToken1;
+        seizeLiquidity;
+
+        // check that the borrow token is listed in comptroller market
+        if (!markets[cTokenBorrowed].isListed) {
+            return uint256(Error.MARKET_NOT_LISTED);
+        }
+
+        // check that lpVault matches our LPVault
+        if (lpVault != address(uniV3LpVault)) {
+            return uint256(Error.LP_VAULT_MISMATCH);
+        }
+
+        // check that lpVault comptroller matches this comptroller
+        if (uniV3LpVault.comptroller() != CToken(cTokenBorrowed).comptroller()) {
             return uint256(Error.COMPTROLLER_MISMATCH);
         }
 
@@ -668,6 +763,52 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         return (uint256(err), liquidity, shortfall);
     }
 
+    function addNFTCollateral(address account, AccountLiquidityLocalVars memory vars) internal view {
+        uint256 userTokensLength = uniV3LpVault.getUserTokensLength(account);
+        for (uint256 i = 0; i < userTokensLength; i++) {
+            uint256 tokenId = uniV3LpVault.userTokens(account, i);
+            (
+                address token0,
+                address token1,
+                uint256 amountToken0Fees,
+                uint256 amountToken1Fees,
+                uint256 amountToken0Liquidity,
+                uint256 amountToken1Liquidity,
+
+            ) = tickOracle.getTokenBreakdownTWAP(tokenId);
+            CToken asset0 = cTokensByUnderlying[token0];
+            CToken asset1 = cTokensByUnderlying[token1];
+
+            {
+                // avoid stack too deep
+                address poolAddress = uniV3LpVault.getPoolAddress(tokenId);
+                uint256 collateralFactorMantissa = poolCollateralFactors[poolAddress];
+
+                vars.collateralFactor = Exp({ mantissa: collateralFactorMantissa });
+            }
+
+            vars.oraclePriceMantissa = oracle.getUnderlyingPrice(asset0);
+            vars.oraclePrice = Exp({ mantissa: vars.oraclePriceMantissa });
+            vars.tokensToDenom = mul_(vars.collateralFactor, vars.oraclePrice);
+
+            vars.sumCollateral = mul_ScalarTruncateAddUInt(
+                vars.tokensToDenom,
+                add_(amountToken0Fees, amountToken0Liquidity),
+                vars.sumCollateral
+            );
+
+            vars.oraclePriceMantissa = oracle.getUnderlyingPrice(asset1);
+            vars.oraclePrice = Exp({ mantissa: vars.oraclePriceMantissa });
+            vars.tokensToDenom = mul_(vars.collateralFactor, vars.oraclePrice);
+
+            vars.sumCollateral = mul_ScalarTruncateAddUInt(
+                vars.tokensToDenom,
+                add_(amountToken1Fees, amountToken1Liquidity),
+                vars.sumCollateral
+            );
+        }
+    }
+
     /**
      * @notice Determine what the account liquidity would be if the given amounts were redeemed/borrowed
      * @param cTokenModify The market to hypothetically redeem/borrow in
@@ -696,6 +837,9 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     {
         AccountLiquidityLocalVars memory vars; // Holds all our calculation results
         uint256 oErr;
+
+        // add all Uni V3 LP Collateral value
+        addNFTCollateral(account, vars);
 
         // For each asset the account is in
         CToken[] memory assets = accountAssets[account];
@@ -802,6 +946,114 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         return (uint256(Error.NO_ERROR), seizeTokens);
     }
 
+    // to avoid stack-too-deep errors on `liquidateCalculateSeizeTokensUniV3`
+    struct LiquidationSeizeLocalVars {
+        uint256 amountToken0Fees;
+        uint256 amountToken1Fees;
+        uint256 amountToken0Liquidity;
+        uint256 amountToken1Liquidity;
+        uint256 amountLiquidity;
+        Exp borrowValue;
+        Exp feeValue;
+        Exp liquidityValue;
+    }
+
+    /**
+     * @notice Calculate amount of liquidity NFT to seize given an underlying amount
+     * @dev Used in liquidation (called in cToken.liquidateBorrowUniV3Fresh)
+     * @param cTokenBorrowed The address of the borrowed cToken
+     * @param collateralTokenId The NFT tokenId to (partially) seize from the borrower
+     * @param actualRepayAmount The amount of cTokenBorrowed underlying to convert into cTokenCollateral tokens
+     * @return (errorCode, percent of fees to be seized, amount of colalteralTokenId liquidity to be seized in a liquidation)
+     */
+    function liquidateCalculateSeizeTokensUniV3(
+        address cTokenBorrowed,
+        uint256 collateralTokenId,
+        uint256 actualRepayAmount
+    )
+        external
+        view
+        returns (
+            uint256,
+            uint128,
+            uint128,
+            uint128
+        )
+    {
+        LiquidationSeizeLocalVars memory vars;
+
+        /*
+         * take the value in eth, convert it to borrow value. see what % the repay borrow + incentive.
+         * if % < 100, then return 0 on liquidity.
+         * If above 100%, take % - 100 to get value that should be removed from total liquidity.
+         * Then take that value, divided by the total value of the liquidity, and multiply by the amount of liquidity.
+         * Cap this liquidity amount at the total liquidity amount (since we've already liquidated everything)
+         */
+
+        address token0;
+        address token1;
+        (
+            token0,
+            token1,
+            vars.amountToken0Fees,
+            vars.amountToken1Fees,
+            vars.amountToken0Liquidity,
+            vars.amountToken1Liquidity,
+            vars.amountLiquidity
+        ) = tickOracle.getTokenBreakdownTWAP(collateralTokenId);
+
+        uint256 priceBorrowedMantissa = oracle.getUnderlyingPrice(CToken(cTokenBorrowed));
+        uint256 oraclePriceMantissa0 = oracle.price(token0);
+        uint256 oraclePriceMantissa1 = oracle.price(token1);
+        if (priceBorrowedMantissa == 0 || oraclePriceMantissa0 == 0 || oraclePriceMantissa1 == 0) {
+            return (uint256(Error.PRICE_ERROR), 0, 0, 0);
+        }
+
+        // TODO: custom liquidation incentive for LP shares
+        vars.borrowValue = mul_(
+            mul_(Exp({ mantissa: liquidationIncentiveMantissa }), Exp({ mantissa: priceBorrowedMantissa })),
+            actualRepayAmount
+        );
+        vars.feeValue = add_(
+            mul_(Exp({ mantissa: oraclePriceMantissa0 }), vars.amountToken0Fees),
+            mul_(Exp({ mantissa: oraclePriceMantissa1 }), vars.amountToken1Fees)
+        );
+        vars.liquidityValue = add_(
+            mul_(Exp({ mantissa: oraclePriceMantissa0 }), vars.amountToken0Liquidity),
+            mul_(Exp({ mantissa: oraclePriceMantissa1 }), vars.amountToken1Liquidity)
+        );
+
+        require(
+            lessThanOrEqualExp(vars.borrowValue, add_(vars.feeValue, vars.liquidityValue)),
+            "borrowValue greater than total collateral"
+        );
+
+        if (lessThanExp(vars.borrowValue, vars.feeValue)) {
+            // only return from fees
+            uint128 seizeAmountToken0Fees = uint128(
+                mul_ScalarTruncate(div_(vars.borrowValue, vars.feeValue), vars.amountToken0Fees)
+            );
+            uint128 seizeAmountToken1Fees = uint128(
+                mul_ScalarTruncate(div_(vars.borrowValue, vars.feeValue), vars.amountToken1Fees)
+            );
+            return (uint256(Error.NO_ERROR), seizeAmountToken0Fees, seizeAmountToken1Fees, 0);
+        } else {
+            // only return from liquidity
+            uint128 seizeAmountLiquidity = uint128(
+                mul_ScalarTruncate(
+                    div_(sub_(vars.borrowValue, vars.feeValue), vars.liquidityValue),
+                    vars.amountLiquidity
+                )
+            );
+            return (
+                uint256(Error.NO_ERROR),
+                uint128(vars.amountToken0Fees),
+                uint128(vars.amountToken1Fees),
+                seizeAmountLiquidity
+            );
+        }
+    }
+
     /*** Admin Functions ***/
 
     /**
@@ -823,6 +1075,47 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
         // Emit NewPriceOracle(oldOracle, newOracle)
         emit NewPriceOracle(oldOracle, newOracle);
+
+        return uint256(Error.NO_ERROR);
+    }
+
+    function _setTickOracle(TickOracle newTickOracle) public returns (uint256) {
+        // Check caller is admin
+        if (msg.sender != admin) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_TICK_ORACLE_OWNER_CHECK);
+        }
+
+        // Track the old oracle for the comptroller
+        TickOracle oldTickOracle = tickOracle;
+
+        // Set comptroller's oracle to newOracle
+        tickOracle = newTickOracle;
+
+        // Emit NewTickOracle(oldTickOracle, newTickOracle)
+        emit NewTickOracle(oldTickOracle, newTickOracle);
+
+        return uint256(Error.NO_ERROR);
+    }
+
+    /**
+     * @notice Sets a new UniV3LpVault for the comptroller
+     * @dev Admin function to set a new UniV3LpVault
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setUniV3LpVault(IUniV3LpVault newVault) public returns (uint256) {
+        // Check caller is admin
+        if (msg.sender != admin) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_PRICE_ORACLE_OWNER_CHECK);
+        }
+
+        // Track the old vault for the comptroller
+        IUniV3LpVault oldVault = uniV3LpVault;
+
+        // Set comptroller's uniV3LpVault to newVault
+        uniV3LpVault = newVault;
+
+        // Emit NewUniV3LpVault(oldVault, newVault)
+        emit NewUniV3LpVault(oldVault, newVault);
 
         return uint256(Error.NO_ERROR);
     }
@@ -1165,6 +1458,40 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         }
     }
 
+    /**
+     * @notice sets the state for many pools of whether or not they are supported as collateral
+     *              in actuality, just limits whether or not a pool can be deposited into the vault
+     * @param pools The addresses of Uni V3 Pools
+     * @param states The state of whether or not this pool is to be supported (corresponding by index to pools)
+     */
+    function _setSupportedPools(address[] calldata pools, bool[] calldata states) external {
+        require(msg.sender == admin, "only admin can set supported pools");
+        require(pools.length > 0, "must have at least one pool");
+        require(pools.length == states.length, "Number of pools and states must be equal");
+        for (uint256 i = 0; i < pools.length; i++) {
+            isSupportedPool[pools[i]] = states[i];
+        }
+    }
+
+    /**
+     * @notice sets the collateral factors for many pools
+     * @param pools The addresses of Uni V3 Pools
+     * @param collateralFactorsMantissa The collateral factors for LP positions of the pools
+     */
+    function _setPoolCollateralFactors(address[] calldata pools, uint256[] calldata collateralFactorsMantissa)
+        external
+    {
+        require(msg.sender == admin, "only admin can set collateral factors for pools");
+        require(pools.length > 0, "must have at least one pool");
+        require(
+            pools.length == collateralFactorsMantissa.length,
+            "Number of pools and collateralFactors must be equal"
+        );
+        for (uint256 i = 0; i < pools.length; i++) {
+            poolCollateralFactors[pools[i]] = collateralFactorsMantissa[i];
+        }
+    }
+
     /*** Helper Functions ***/
 
     /**
@@ -1204,7 +1531,10 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * Prevents pool-wide/cross-asset reentrancy exploits like AMP on Cream.
      */
     function _beforeNonReentrant() external {
-        require(markets[msg.sender].isListed, "Comptroller:_beforeNonReentrant: caller not listed as market");
+        require(
+            markets[msg.sender].isListed || msg.sender == address(uniV3LpVault),
+            "Comptroller:_beforeNonReentrant: caller not listed as market or lpVault"
+        );
         require(_notEntered, "re-entered across assets");
         _notEntered = false;
     }
@@ -1214,7 +1544,10 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * Prevents pool-wide/cross-asset reentrancy exploits like AMP on Cream.
      */
     function _afterNonReentrant() external {
-        require(markets[msg.sender].isListed, "Comptroller:_afterNonReentrant: caller not listed as market");
+        require(
+            markets[msg.sender].isListed || msg.sender == address(uniV3LpVault),
+            "Comptroller:_afterNonReentrant: caller not listed as market or lpVault"
+        );
         _notEntered = true; // get a gas-refund post-Istanbul
     }
 }

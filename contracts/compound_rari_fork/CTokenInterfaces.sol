@@ -175,6 +175,19 @@ contract CTokenInterface is CTokenStorage {
         uint256 seizeTokens
     );
 
+    /**
+     * @notice Event emitted when a borrow is liquidated (UniV3 collateral)
+     */
+    event LiquidateBorrowUniV3(
+        address liquidator,
+        address borrower,
+        uint256 actualRepayAmount,
+        uint256 tokenId,
+        uint256 seizeFeesToken0,
+        uint256 seizeFeesToken1,
+        uint256 seizeLiquidity
+    );
+
     /*** Admin Events ***/
 
     /**
@@ -297,15 +310,13 @@ contract CErc20Storage {
 contract CErc20Interface is CErc20Storage {
     /*** User Interface ***/
 
-    function mint(uint256 mintAmount) external returns (uint256);
+    function mintBehalf(address minter, uint256 mintAmount) external returns (uint256);
 
-    function redeem(uint256 redeemTokens) external returns (uint256);
+    function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256);
 
-    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);
+    function redeemUnderlyingBehalf(address redeemer, uint256 redeemAmount) external returns (uint256);
 
-    function borrow(uint256 borrowAmount) external returns (uint256);
-
-    function repayBorrow(uint256 repayAmount) external returns (uint256);
+    function borrowBehalf(address borrower, uint256 borrowAmount) external returns (uint256);
 
     function repayBorrowBehalf(address borrower, uint256 repayAmount) external returns (uint256);
 
@@ -313,6 +324,12 @@ contract CErc20Interface is CErc20Storage {
         address borrower,
         uint256 repayAmount,
         CTokenInterface cTokenCollateral
+    ) external returns (uint256);
+
+    function liquidateBorrowUniV3(
+        address borrower,
+        uint256 repayAmount,
+        uint256 collateralTokenId
     ) external returns (uint256);
 
     function sweepToken(EIP20NonStandardInterface token) external;

@@ -2,6 +2,8 @@ pragma solidity ^0.5.16;
 
 import "./CToken.sol";
 import "./PriceOracle.sol";
+import "./external/TickOracle.sol";
+import "./external/IUniV3LpVault.sol";
 
 contract UnitrollerAdminStorage {
     /**
@@ -32,6 +34,24 @@ contract ComptrollerV1Storage is UnitrollerAdminStorage {
     PriceOracle public oracle;
 
 
+
+    /**
+     * @notice Tick oracle which gives the current tick of a given Uni V3 Pool
+     */
+    TickOracle public tickOracle;
+
+    /**
+     * @notice Vault which holds and values user's Uni V3 LP Collateral
+     */
+    IUniV3LpVault public uniV3LpVault;
+    /**
+     * @notice Mapping of which pools are supported for Uni V3 LP Collateral
+     */
+    mapping(address => bool) public isSupportedPool;
+    /**
+     * @notice Mapping of pools to their collateralFactors in mantissa
+     */
+    mapping(address => uint256) public poolCollateralFactors;
 
     /**
      * @notice Multiplier used to calculate the maximum repayAmount when liquidating a borrow

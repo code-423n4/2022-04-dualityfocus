@@ -46,53 +46,47 @@ contract CErc20 is CToken, CErc20Interface {
     /*** User Interface ***/
 
     /**
-     * @notice Sender supplies assets into the market and receives cTokens in exchange
+     * @notice Sender supplies assets into the market on behalf of minter and receives cTokens in exchange
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param minter The account minting the cTokens
      * @param mintAmount The amount of the underlying asset to supply
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function mint(uint256 mintAmount) external returns (uint256) {
-        (uint256 err, ) = mintInternal(mintAmount);
+    function mintBehalf(address minter, uint256 mintAmount) external returns (uint256) {
+        (uint256 err, ) = mintBehalfInternal(minter, mintAmount);
         return err;
     }
 
     /**
-     * @notice Sender redeems cTokens in exchange for the underlying asset
+     * @notice Sender redeems cTokens on behalf of redeemer in exchange for the underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param redeemer The account redeeming the cTokens
      * @param redeemTokens The number of cTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeem(uint256 redeemTokens) external returns (uint256) {
-        return redeemInternal(redeemTokens);
+    function redeemBehalf(address redeemer, uint256 redeemTokens) external returns (uint256) {
+        return redeemBehalfInternal(redeemer, redeemTokens);
     }
 
     /**
-     * @notice Sender redeems cTokens in exchange for a specified amount of underlying asset
+     * @notice Sender redeems cTokens on behalf of redeemer in exchange for a specified amount of underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param redeemer The account redeeming the cTokens
      * @param redeemAmount The amount of underlying to redeem
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeemUnderlying(uint256 redeemAmount) external returns (uint256) {
-        return redeemUnderlyingInternal(redeemAmount);
+    function redeemUnderlyingBehalf(address redeemer, uint256 redeemAmount) external returns (uint256) {
+        return redeemUnderlyingBehalfInternal(redeemer, redeemAmount);
     }
 
     /**
-     * @notice Sender borrows assets from the protocol to their own address
+     * @notice Sender borrows assets from the protocol on behalf of borrower
+     * @param borrower the account with the debt being payed off
      * @param borrowAmount The amount of the underlying asset to borrow
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function borrow(uint256 borrowAmount) external returns (uint256) {
-        return borrowInternal(borrowAmount);
-    }
-
-    /**
-     * @notice Sender repays their own borrow
-     * @param repayAmount The amount to repay
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function repayBorrow(uint256 repayAmount) external returns (uint256) {
-        (uint256 err, ) = repayBorrowInternal(repayAmount);
-        return err;
+    function borrowBehalf(address borrower, uint256 borrowAmount) external returns (uint256) {
+        return borrowBehalfInternal(borrower, borrowAmount);
     }
 
     /**
@@ -123,6 +117,22 @@ contract CErc20 is CToken, CErc20Interface {
         return err;
     }
 
+    /**
+     * @notice The sender liquidates the borrowers collateral UniV3 LP Position.
+     *  The collateral seized is transferred to the liquidator.
+     * @param borrower The borrower of this cToken to be liquidated
+     * @param repayAmount The amount of the underlying borrowed asset to repay
+     * @param collateralTokenId The NFT tokenId to (partially) seize from the borrower
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function liquidateBorrowUniV3(
+        address borrower,
+        uint256 repayAmount,
+        uint256 collateralTokenId
+    ) external returns (uint256) {
+        (uint256 err, ) = liquidateBorrowUniV3Internal(borrower, repayAmount, collateralTokenId);
+        return err;
+    }
 
     /**
      * @notice A public function to sweep accidental ERC-20 transfers to this contract. Tokens are sent to admin

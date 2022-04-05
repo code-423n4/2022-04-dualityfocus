@@ -489,7 +489,28 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return (fail(Error(error), FailureInfo.MINT_ACCRUE_INTEREST_FAILED), 0);
         }
         // mintFresh emits the actual Mint event if successful and logs on errors, so we don't need to
-        return mintFresh(msg.sender, mintAmount);
+        return mintFresh(msg.sender, msg.sender, mintAmount);
+    }
+
+    /**
+     * @notice Sender supplies assets into the market on behalf of minter and receives cTokens in exchange
+     * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param minter The account minting the cTokens
+     * @param mintAmount The amount of the underlying asset to supply
+     * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual mint amount.
+     */
+    function mintBehalfInternal(address minter, uint256 mintAmount)
+        internal
+        nonReentrant(false)
+        returns (uint256, uint256)
+    {
+        uint256 error = accrueInterest();
+        if (error != uint256(Error.NO_ERROR)) {
+            // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
+            return (fail(Error(error), FailureInfo.MINT_ACCRUE_INTEREST_FAILED), 0);
+        }
+        // mintFresh emits the actual Mint event if successful and logs on errors, so we don't need to
+        return mintFresh(msg.sender, minter, mintAmount);
     }
 
     struct MintLocalVars {
@@ -505,11 +526,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     /**
      * @notice User supplies assets into the market and receives cTokens in exchange
      * @dev Assumes interest has already been accrued up to the current block
-     * @param minter The address of the account which is supplying the assets
+     * @param payer The address of the account which is supplying the assets
+     * @param minter The address of the account under which supply is tracked
      * @param mintAmount The amount of the underlying asset to supply
      * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual mint amount.
      */
-    function mintFresh(address minter, uint256 mintAmount) internal returns (uint256, uint256) {
+    function mintFresh(
+        address payer,
+        address minter,
+        uint256 mintAmount
+    ) internal returns (uint256, uint256) {
         /* Fail if mint not allowed */
         uint256 allowed = comptroller.mintAllowed(address(this), minter, mintAmount);
         if (allowed != 0) {
@@ -540,7 +566,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
          *  in case of a fee. On success, the cToken holds an additional `actualMintAmount`
          *  of cash.
          */
-        vars.actualMintAmount = doTransferIn(minter, mintAmount);
+        vars.actualMintAmount = doTransferIn(payer, mintAmount);
 
         /*
          * We get the current exchange rate and calculate the number of cTokens to be minted:
@@ -574,35 +600,52 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Sender redeems cTokens in exchange for the underlying asset
+     * @notice Sender redeems cTokens on behalf of redeemer in exchange for the underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param redeemer The account redeeming the cTokens
      * @param redeemTokens The number of cTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeemInternal(uint256 redeemTokens) internal nonReentrant(false) returns (uint256) {
+    function redeemBehalfInternal(address redeemer, uint256 redeemTokens)
+        internal
+        nonReentrant(false)
+        returns (uint256)
+    {
+        require(
+            msg.sender == address(comptroller.uniV3LpVault()) || msg.sender == redeemer,
+            "only the LpVault may redeem other's assets"
+        );
         uint256 error = accrueInterest();
         if (error != uint256(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted redeem failed
             return fail(Error(error), FailureInfo.REDEEM_ACCRUE_INTEREST_FAILED);
         }
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
-        return redeemFresh(msg.sender, redeemTokens, 0);
+        return redeemFresh(msg.sender, redeemer, redeemTokens, 0);
     }
 
     /**
-     * @notice Sender redeems cTokens in exchange for a specified amount of underlying asset
+     * @notice Sender redeems cTokens on behalf of redeemer in exchange for a specified amount of underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param redeemAmount The amount of underlying to receive from redeeming cTokens
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeemUnderlyingInternal(uint256 redeemAmount) internal nonReentrant(false) returns (uint256) {
+    function redeemUnderlyingBehalfInternal(address redeemer, uint256 redeemAmount)
+        internal
+        nonReentrant(false)
+        returns (uint256)
+    {
+        require(
+            msg.sender == address(comptroller.uniV3LpVault()) || msg.sender == redeemer,
+            "only the LpVault may redeem other's assets"
+        );
         uint256 error = accrueInterest();
         if (error != uint256(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted redeem failed
             return fail(Error(error), FailureInfo.REDEEM_ACCRUE_INTEREST_FAILED);
         }
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
-        return redeemFresh(msg.sender, 0, redeemAmount);
+        return redeemFresh(msg.sender, redeemer, 0, redeemAmount);
     }
 
     struct RedeemLocalVars {
@@ -618,13 +661,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     /**
      * @notice User redeems cTokens in exchange for the underlying asset
      * @dev Assumes interest has already been accrued up to the current block
-     * @param redeemer The address of the account which is redeeming the tokens
+     * @param to The address of the account which is redeeming the tokens
+     * @param redeemer The address of the account under which redemption is tracked
      * @param redeemTokensIn The number of cTokens to redeem into underlying (only one of redeemTokensIn or redeemAmountIn may be non-zero)
      * @param redeemAmountIn The number of underlying tokens to receive from redeeming cTokens (only one of redeemTokensIn or redeemAmountIn may be non-zero)
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function redeemFresh(
-        address payable redeemer,
+        address payable to,
+        address redeemer,
         uint256 redeemTokensIn,
         uint256 redeemAmountIn
     ) internal returns (uint256) {
@@ -733,7 +778,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
          *  On success, the cToken has redeemAmount less of cash.
          *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
          */
-        doTransferOut(redeemer, vars.redeemAmount);
+        doTransferOut(to, vars.redeemAmount);
 
         /* We write previously calculated values into storage */
         totalSupply = vars.totalSupplyNew;
@@ -750,18 +795,27 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Sender borrows assets from the protocol to their own address
+     * @notice Sender borrows assets from the protocol on behalf of borrower
+     * @param borrower The address of the account under which borrowing is tracked
      * @param borrowAmount The amount of the underlying asset to borrow
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function borrowInternal(uint256 borrowAmount) internal nonReentrant(false) returns (uint256) {
+    function borrowBehalfInternal(address borrower, uint256 borrowAmount)
+        internal
+        nonReentrant(false)
+        returns (uint256)
+    {
+        require(
+            msg.sender == address(comptroller.uniV3LpVault()) || msg.sender == borrower,
+            "only the LpVault may borrow against other's collateral"
+        );
         uint256 error = accrueInterest();
         if (error != uint256(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
             return fail(Error(error), FailureInfo.BORROW_ACCRUE_INTEREST_FAILED);
         }
         // borrowFresh emits borrow-specific logs on errors, so we don't need to
-        return borrowFresh(msg.sender, borrowAmount);
+        return borrowFresh(msg.sender, borrower, borrowAmount);
     }
 
     struct BorrowLocalVars {
@@ -772,11 +826,17 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Users borrow assets from the protocol to their own address
+     * @notice Users borrow assets from the protocol
+     * @param to The address of the account which is borrowing the tokens
+     * @param borrower The address of the account under which borrowing is tracked
      * @param borrowAmount The amount of the underlying asset to borrow
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function borrowFresh(address payable borrower, uint256 borrowAmount) internal returns (uint256) {
+    function borrowFresh(
+        address payable to,
+        address borrower,
+        uint256 borrowAmount
+    ) internal returns (uint256) {
         /* Fail if borrow not allowed */
         uint256 allowed = comptroller.borrowAllowed(address(this), borrower, borrowAmount);
         if (allowed != 0) {
@@ -842,7 +902,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
          *  On success, the cToken borrowAmount less of cash.
          *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
          */
-        doTransferOut(borrower, borrowAmount);
+        doTransferOut(to, borrowAmount);
 
         /* We write the previously calculated values into storage */
         accountBorrows[borrower].principal = vars.accountBorrowsNew;
@@ -1002,6 +1062,28 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
+     * @notice The sender liquidates the borrowers Uni V3 LP collateral.
+     *  The collateral seized is transferred to the liquidator.
+     * @param borrower The borrower of this cToken to be liquidated
+     * @param collateralTokenId The NFT tokenId to (partially) seize from the borrower
+     * @param repayAmount The amount of the underlying borrowed asset to repay
+     * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual repayment amount.
+     */
+    function liquidateBorrowUniV3Internal(
+        address borrower,
+        uint256 repayAmount,
+        uint256 collateralTokenId
+    ) internal nonReentrant(false) returns (uint256, uint256) {
+        uint256 error = accrueInterest();
+        if (error != uint256(Error.NO_ERROR)) {
+            // accrueInterest emits logs on errors, but we still want to log the fact that an attempted liquidation failed
+            return (fail(Error(error), FailureInfo.LIQUIDATE_ACCRUE_BORROW_INTEREST_FAILED), 0);
+        }
+        // liquidateBorrowUniV3Fresh emits borrow-specific logs on errors, so we don't need to
+        return liquidateBorrowUniV3Fresh(msg.sender, borrower, repayAmount, collateralTokenId);
+    }
+
+    /**
      * @notice The liquidator liquidates the borrowers collateral.
      *  The collateral seized is transferred to the liquidator.
      * @param borrower The borrower of this cToken to be liquidated
@@ -1088,6 +1170,87 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         /* We emit a LiquidateBorrow event */
         emit LiquidateBorrow(liquidator, borrower, actualRepayAmount, address(cTokenCollateral), seizeTokens);
 
+        return (uint256(Error.NO_ERROR), actualRepayAmount);
+    }
+
+    /**
+     * @notice The liquidator liquidates the borrowers collateral.
+     *  The collateral seized is transferred to the liquidator.
+     * @param borrower The borrower of this cToken to be liquidated
+     * @param liquidator The address repaying the borrow and seizing collateral
+     * @param collateralTokenId The NFT tokenId to (partially) seize from the borrower
+     * @param repayAmount The amount of the underlying borrowed asset to repay
+     * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual repayment amount.
+     */
+    function liquidateBorrowUniV3Fresh(
+        address liquidator,
+        address borrower,
+        uint256 repayAmount,
+        uint256 collateralTokenId
+    ) internal returns (uint256, uint256) {
+        /* Fail if liquidate not allowed */
+        uint256 allowed = comptroller.liquidateBorrowUniV3Allowed(
+            address(this),
+            collateralTokenId,
+            liquidator,
+            borrower,
+            repayAmount
+        );
+        if (allowed != 0) {
+            return (failOpaque(Error.COMPTROLLER_REJECTION, FailureInfo.LIQUIDATE_COMPTROLLER_REJECTION, allowed), 0);
+        }
+        // could reduce duplication of below checks and share w/ liquidateBorrowFresh
+        /* Verify market's block number equals current block number */
+        if (accrualBlockNumber != getBlockNumber()) {
+            return (fail(Error.MARKET_NOT_FRESH, FailureInfo.LIQUIDATE_FRESHNESS_CHECK), 0);
+        }
+        /* Fail if borrower = liquidator */
+        if (borrower == liquidator) {
+            return (fail(Error.INVALID_ACCOUNT_PAIR, FailureInfo.LIQUIDATE_LIQUIDATOR_IS_BORROWER), 0);
+        }
+        /* Fail if repayAmount = 0 */
+        if (repayAmount == 0) {
+            return (fail(Error.INVALID_CLOSE_AMOUNT_REQUESTED, FailureInfo.LIQUIDATE_CLOSE_AMOUNT_IS_ZERO), 0);
+        }
+        /* Fail if repayAmount = -1 */
+        if (repayAmount == uint256(-1)) {
+            return (fail(Error.INVALID_CLOSE_AMOUNT_REQUESTED, FailureInfo.LIQUIDATE_CLOSE_AMOUNT_IS_UINT_MAX), 0);
+        }
+        /* Fail if repayBorrow fails */
+        (uint256 repayBorrowError, uint256 actualRepayAmount) = repayBorrowFresh(liquidator, borrower, repayAmount);
+        if (repayBorrowError != uint256(Error.NO_ERROR)) {
+            return (fail(Error(repayBorrowError), FailureInfo.LIQUIDATE_REPAY_BORROW_FRESH_FAILED), 0);
+        }
+        /////////////////////////
+        // EFFECTS & INTERACTIONS
+        // (No safe failures beyond this point)
+        (
+            uint256 amountSeizeError,
+            uint256 seizeFeesToken0,
+            uint256 seizeFeesToken1,
+            uint256 seizeLiquidity
+        ) = comptroller.liquidateCalculateSeizeTokensUniV3(address(this), collateralTokenId, actualRepayAmount);
+        require(amountSeizeError == uint256(Error.NO_ERROR), "LIQUIDATE_COMPTROLLER_CALCULATE_AMOUNT_SEIZE_FAILED");
+        comptroller.uniV3LpVault().seizeAssets(
+            liquidator,
+            borrower,
+            collateralTokenId,
+            seizeFeesToken0,
+            seizeFeesToken1,
+            seizeLiquidity
+        );
+        /* Revert if seize tokens fails (since we cannot be sure of side effects) */
+        // require(seizeError == uint256(Error.NO_ERROR), "token seizure failed");
+        /* We emit a LiquidateBorrow event */
+        emit LiquidateBorrowUniV3(
+            liquidator,
+            borrower,
+            actualRepayAmount,
+            collateralTokenId,
+            seizeFeesToken0,
+            seizeFeesToken1,
+            seizeLiquidity
+        );
         return (uint256(Error.NO_ERROR), actualRepayAmount);
     }
 

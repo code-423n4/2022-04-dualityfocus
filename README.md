@@ -144,6 +144,27 @@ More information on contracts can be found here [**TODO: link to contracts readm
 - **Upgradeability**
 
   We have removed Compound's CToken and Comptroller upgradeability. However, the admin can update the LP Vault contract address, and can also update the oracle used for a given asset.
+  
+## How to get started
+
+To install necessary libraries and build our types:
+
+```
+$ yarn install && yarn typechain
+```
+
+To compile contracts:
+
+```
+$ yarn compile
+```
+
+And to run tests:
+
+```
+$ yarn test
+```
+
 
 # Resources
 ## Duality Links

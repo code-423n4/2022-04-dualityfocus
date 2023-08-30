@@ -1,0 +1,110 @@
+==============================================================
+Guild: Code4rena
+Channel: ARCHIVE-Q2-2022 / ☑dualityfocus-apr6
+==============================================================
+
+[04/04/2022 9:03 PM] kartoonjoy
+👋 Hello and welcome to the contest channel for the **$30K USDC Duality Focus** contest!
+
+📆 Contest opens April 6, 2022 at 0:00 UTC and runs through April 8, 2022 at 23:59 UTC (3 days).
+
+Please give a warm welcome to the Duality Focus team, particularly @kismet108 and @DramaOne, who will be available for questions either here in the channel or via DM.
+
+We'll be posting relevant links, documentation, etc. here, so if you intend to participate in this contest, consider enabling notifications for this channel. 🐺 ⏰
+
+Contest Page: https://code4rena.com/contests/2022-04-duality-focus-contest
+
+{Embed}
+https://code4rena.com/contests/2022-04-duality-focus-contest
+Code4rena Duality Focus contest
+$30,000 USDC
+6 April 2022—8 April 2022
+Code4rena - ARCHIVE-Q2-2022 - ☑dualityfocus-apr6 [960644250842853411].txt_Files/C4-banner-7C19B.png
+
+{Reactions}
+🥳 (2) 
+
+[04/05/2022 7:20 PM] itsmetechjay (pinned)
+Hey wardens, please note that for this contest, **gas optimizations are out of scope. **The Duality Focus team will not be awarding prize funds for gas-specific submissions.
+
+
+[04/05/2022 9:36 PM] DramaOne#4728
+Hi all! Excited for this contest, please feel free to DM us about any questions you may have after start! We'll be doing our best to make sure one of us is available at almost all times
+
+{Reactions}
+🎉 (3) 
+
+[04/06/2022 5:46 AM] 0v3rf10w
+```
+Compilation warnings/errors on contracts/vault_and_oracles/UniV3LpVault.sol:
+Compiler error: Stack too deep when compiling inline assembly: Variable headStart is 1 slot(s) too deep inside the stack.
+```
+
+
+[04/06/2022 5:46 AM] 0v3rf10w
+Any workaround?
+
+
+[04/06/2022 5:57 AM] DramaOne#4728
+what command is this from?
+
+
+[04/06/2022 5:59 AM] DramaOne#4728
+if from `hardhat coverage` take a look at https://github.com/sc-forks/solidity-coverage/blob/master/docs/faq.md#running-out-of-stack
+
+{Embed}
+https://github.com/sc-forks/solidity-coverage/blob/master/docs/faq.md
+solidity-coverage/faq.md at master · sc-forks/solidity-coverage
+Code coverage for Solidity smart-contracts . Contribute to sc-forks/solidity-coverage development by creating an account on GitHub.
+Code4rena - ARCHIVE-Q2-2022 - ☑dualityfocus-apr6 [960644250842853411].txt_Files/solidity-coverage-0FDB7
+
+
+[04/06/2022 6:00 AM] DramaOne#4728
+otherwise if it's just from normal compiling, you can just reduce the number of optimizer runs in `hardhat.config.ts` (1 run is optimal for size)
+
+
+[04/06/2022 6:01 AM] DramaOne#4728
+i've also seen this from static analyzers like slither, in which case i would recommend running on the entire hardhat project where it can leverage optimizers, rather than just on a single file
+
+
+[04/06/2022 6:02 AM] 0v3rf10w
+nope just compiling `crytic-compile contracts/vault_and_oracles/UniV3LpVault.sol --solc-remaps @openzeppelin=$HOME/.nvm/versions/node/v16.13.0/lib/node_modules/@openzeppelin`
+
+
+[04/06/2022 6:02 AM] 0v3rf10w
+sure 👍 will try 🙂
+
+{Reactions}
+👍 
+
+[04/06/2022 6:03 AM] DramaOne#4728
+let me know how it goes!
+
+{Reactions}
+👍 
+
+[04/06/2022 5:02 PM] cloudellie
+Pinned a message.
+
+
+[04/08/2022 5:30 PM] chomtana
+Optimization?
+
+
+[04/09/2022 12:02 AM] C4
+**🚨 CONTEST ALERT**
+
+@🐺wardens  The **Duality Focus** contest is now closed! Huge thanks to everyone who participated🔍, whether you submitted a finding or not.
+
+What's next: the Duality Focus team will review the findings over the next couple of days, and then we'll pass them off to the judge. Keep an eye on #📢announcements for regular updates on how the contest is progressing through awarding 🤑🏆, judging 🧑‍⚖️ and reporting 📜. Feel free to ping a gardener if you have questions along the way!
+
+
+[04/09/2022 3:27 AM] kismet108#7212
+thanks all for participating!
+
+{Reactions}
+thankyou (2) 
+
+==============================================================
+Exported 16 message(s)
+==============================================================
